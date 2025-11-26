@@ -1,0 +1,1754 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>SkyFive OAG Coverage Intelligence Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- Mapbox -->
+  <link
+    href="https://api.mapbox.com/mapbox-gl-js/v3.6.0/mapbox-gl.css"
+    rel="stylesheet"
+  />
+  <script src="https://api.mapbox.com/mapbox-gl-js/v3.6.0/mapbox-gl.js"></script>
+
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- Chart.js datalabels plugin -->
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
+
+  <!-- PapaParse for CSV -->
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+
+  <!-- Turf.js for great-circle routes -->
+  <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
+
+  <style>
+    :root {
+      --bg-main: #020716;
+      --bg-card: rgba(11, 20, 40, 0.9);
+      --bg-card-soft: rgba(11, 20, 40, 0.75);
+      --accent-1: #54b8b3;
+      --accent-2: #7ec7fa;
+      --accent-red: #a92317;
+      --accent-red-soft: rgba(169, 35, 23, 0.5);
+      --accent-red-lighter: rgba(208, 163, 161, 0.7);
+      --text-main: #e9f0ff;
+      --text-soft: #9fb3d9;
+      --border-subtle: rgba(255, 255, 255, 0.08);
+      --chip-bg: rgba(255, 255, 255, 0.06);
+      --chip-bg-active: rgba(84, 184, 179, 0.16);
+      --chip-border-active: rgba(84, 184, 179, 0.9);
+      --radius-lg: 18px;
+      --radius-md: 12px;
+      --shadow-soft: 0 20px 40px rgba(0, 0, 0, 0.55);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+      background: #020716;
+      color: var(--text-main);
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    .dashboard-root {
+      display: grid;
+      grid-template-rows: auto 1fr;
+      height: 100vh;
+      padding: 10px 12px;
+      gap: 10px;
+    }
+
+    /* Top bar */
+    .top-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .top-title {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .top-title h1 {
+      margin: 0;
+      font-size: 20px;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+
+    .top-title span {
+      font-size: 11px;
+      color: var(--text-soft);
+    }
+
+    .top-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .file-upload-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: linear-gradient(135deg, #0f172a, #1d293b);
+      border-radius: 999px;
+      padding: 6px 14px;
+      border: 1px solid var(--border-subtle);
+      font-size: 11px;
+      cursor: pointer;
+      color: var(--text-main);
+      box-shadow: var(--shadow-soft);
+    }
+
+    .file-upload-label span.icon {
+      display: inline-flex;
+      width: 16px;
+      height: 16px;
+      border-radius: 999px;
+      background: linear-gradient(135deg, var(--accent-1), var(--accent-2));
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      color: #020617;
+    }
+
+    .file-upload-label:hover {
+      border-color: var(--accent-2);
+    }
+
+    #oagFileInput {
+      display: none;
+    }
+
+    .tag-pill {
+      font-size: 10px;
+      padding: 3px 9px;
+      border-radius: 999px;
+      background: rgba(15, 23, 42, 0.8);
+      border: 1px solid rgba(148, 163, 184, 0.35);
+      color: var(--text-soft);
+      text-transform: uppercase;
+      letter-spacing: 0.09em;
+    }
+
+    /* Main grid: left – center (3 rows) – right */
+    .main-grid {
+      display: grid;
+      grid-template-columns: 290px minmax(420px, 1.4fr) 350px;
+      gap: 10px;
+      min-height: 0;
+      height: 100%;
+    }
+
+    .card {
+      background: var(--bg-card);
+      border-radius: var(--radius-lg);
+      border: 1px solid var(--border-subtle);
+      padding: 10px 12px;
+      box-shadow: var(--shadow-soft);
+      backdrop-filter: blur(16px);
+    }
+
+    .card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 6px;
+    }
+
+    .card-header h2 {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: var(--text-soft);
+      margin: 0;
+    }
+
+    .card-header small {
+      font-size: 10px;
+      color: var(--text-soft);
+    }
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 6px;
+      margin-top: 4px;
+    }
+
+    .stat-card {
+      border-radius: var(--radius-md);
+      padding: 6px 7px;
+      background: linear-gradient(
+        135deg,
+        rgba(15, 23, 42, 0.95),
+        rgba(15, 23, 42, 0.4)
+      );
+      border: 1px solid rgba(148, 163, 184, 0.18);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .stat-card::before {
+      content: "";
+      position: absolute;
+      inset: -50%;
+      background: radial-gradient(
+        circle at top left,
+        rgba(84, 184, 179, 0.25),
+        transparent 60%
+      );
+      opacity: 0.8;
+      pointer-events: none;
+    }
+
+    .stat-header {
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 4px;
+    }
+
+    .stat-label {
+      font-size: 10px;
+      color: var(--text-soft);
+      margin-bottom: 2px;
+    }
+
+    .stat-help {
+      font-size: 10px;
+      color: var(--text-soft);
+      opacity: 0.7;
+      cursor: default;
+      position: relative;
+    }
+
+    .stat-help::after {
+      content: attr(data-tip);
+      position: absolute;
+      left: 50%;
+      transform: translateX(-50%);
+      bottom: 140%;
+      background: rgba(15, 23, 42, 0.96);
+      color: var(--text-main);
+      font-size: 10px;
+      padding: 4px 6px;
+      border-radius: 6px;
+      border: 1px solid rgba(148, 163, 184, 0.5);
+      white-space: nowrap;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.15s ease;
+      z-index: 5;
+    }
+
+    .stat-help:hover::after {
+      opacity: 1;
+    }
+
+    .stat-value {
+      position: relative;
+      font-size: 16px;
+      font-weight: 600;
+    }
+
+    .stat-sub {
+      position: relative;
+      font-size: 10px;
+      color: var(--text-soft);
+      margin-top: 1px;
+    }
+
+    .chip-row {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-top: 6px;
+    }
+
+    .chip-toggle {
+      border-radius: 999px;
+      padding: 4px 9px;
+      font-size: 10px;
+      background: var(--chip-bg);
+      border: 1px solid rgba(148, 163, 184, 0.4);
+      color: var(--text-soft);
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .chip-toggle span.dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: rgba(148, 163, 184, 0.7);
+    }
+
+    .chip-toggle.active {
+      background: var(--chip-bg-active);
+      border-color: var(--chip-border-active);
+      color: var(--accent-1);
+    }
+
+    .chip-toggle.active span.dot {
+      background: var(--accent-1);
+    }
+
+    .select-group {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      margin-top: 6px;
+    }
+
+    .select-label {
+      font-size: 10px;
+      color: var(--text-soft);
+    }
+
+    select {
+      border-radius: 999px;
+      padding: 4px 9px;
+      font-size: 11px;
+      border: 1px solid rgba(148, 163, 184, 0.4);
+      background: rgba(15, 23, 42, 0.9);
+      color: var(--text-main);
+      outline: none;
+    }
+
+    select[multiple] {
+      border-radius: 10px;
+      min-height: 60px;
+      padding: 4px 9px;
+    }
+
+    .search-group {
+      margin-top: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .search-row {
+      display: grid;
+      grid-template-columns: 1.2fr 0.6fr;
+      gap: 4px;
+    }
+
+    .search-input {
+      border-radius: 999px;
+      padding: 4px 9px;
+      font-size: 11px;
+      border: 1px solid rgba(148, 163, 184, 0.4);
+      background: rgba(15, 23, 42, 0.9);
+      color: var(--text-main);
+      outline: none;
+    }
+
+    .search-button {
+      border-radius: 999px;
+      padding: 4px 9px;
+      font-size: 11px;
+      border: 1px solid rgba(84,184,179,0.6);
+      background: rgba(84, 184, 179, 0.16);
+      color: var(--accent-1);
+      cursor: pointer;
+    }
+
+    .search-button:hover {
+      border-color: rgba(84,184,179,1);
+    }
+
+    .search-hint {
+      font-size: 9px;
+      color: var(--text-soft);
+    }
+
+    /* Middle column: 3 rows */
+    .middle-column {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      min-height: 0;
+    }
+
+    .coverage-card {
+      background: var(--bg-card-soft);
+      border-radius: 20px;
+      border: 1px solid var(--border-subtle);
+      padding: 6px 10px;
+      box-shadow: var(--shadow-soft);
+      backdrop-filter: blur(16px);
+    }
+
+    .coverage-row {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    .map-card {
+      position: relative;
+      background: var(--bg-card-soft);
+      border-radius: 26px;
+      border: 1px solid var(--border-subtle);
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.7);
+      overflow: hidden;
+      min-height: 0;
+      flex: 0 0 auto;
+      height: 60vh;
+    }
+
+    #map {
+      position: absolute;
+      inset: 0;
+    }
+
+    .map-pill {
+      font-size: 10px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: rgba(15, 23, 42, 0.82);
+      border: 1px solid rgba(148, 163, 184, 0.35);
+      color: var(--text-soft);
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      backdrop-filter: blur(14px);
+    }
+
+    .map-pill input {
+      margin: 0;
+    }
+
+    .color-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      background: var(--accent-red);
+    }
+
+    .color-dot.soft {
+      background: var(--accent-red-soft);
+    }
+
+    .color-dot.light {
+      background: var(--accent-red-lighter);
+    }
+
+    .map-overlay-legend {
+      position: absolute;
+      right: 10px;
+      bottom: 10px;
+      z-index: 2;
+      pointer-events: none;
+    }
+
+    .legend-card {
+      pointer-events: auto;
+      background: rgba(15, 23, 42, 0.9);
+      border-radius: 12px;
+      border: 1px solid rgba(148,163,184,0.4);
+      padding: 6px 8px;
+      font-size: 9px;
+      color: var(--text-soft);
+      backdrop-filter: blur(12px);
+    }
+
+    .legend-row {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      margin: 1px 0;
+    }
+
+    .legend-line {
+      width: 16px;
+      height: 2px;
+      border-radius: 999px;
+    }
+
+    .insight-card {
+      background: radial-gradient(circle at top left, rgba(84,184,179,0.18), rgba(15,23,42,0.95));
+      border-radius: 20px;
+      border: 1px solid rgba(148,163,184,0.45);
+      padding: 8px 10px;
+      box-shadow: var(--shadow-soft);
+      min-height: 110px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+
+    .insight-title {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-soft);
+      margin-bottom: 4px;
+    }
+
+    .insight-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .insight-item {
+      border-radius: 12px;
+      padding: 6px 7px;
+      background: rgba(15,23,42,0.9);
+      border: 1px solid rgba(148,163,184,0.35);
+    }
+
+    .insight-label {
+      font-size: 9px;
+      color: var(--text-soft);
+      margin-bottom: 3px;
+    }
+
+    .insight-value {
+      font-size: 15px;
+      font-weight: 600;
+    }
+
+    .insight-sub {
+      font-size: 9px;
+      color: var(--text-soft);
+      margin-top: 2px;
+    }
+
+    /* Right column charts */
+    .chart-card {
+      height: 100%;
+      display: grid;
+      grid-template-rows: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+      min-height: 0;
+    }
+
+    .chart-panel {
+      background: var(--bg-card);
+      border-radius: var(--radius-lg);
+      border: 1px solid var(--border-subtle);
+      padding: 8px 10px;
+      box-shadow: var(--shadow-soft);
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .chart-title {
+      font-size: 11px;
+      color: var(--text-soft);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 4px;
+    }
+
+    .chart-inner {
+      flex: 1;
+      min-height: 0;
+      position: relative;
+    }
+
+    .chart-inner canvas {
+      width: 100% !important;
+      height: 100% !important;
+    }
+
+    .hint-text {
+      font-size: 10px;
+      color: var(--text-soft);
+      margin-top: 2px;
+    }
+
+    .mini-kpi {
+      font-size: 9px;
+      color: var(--text-soft);
+      margin-top: 3px;
+    }
+
+    .dual-chart-inner {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      height: 100%;
+    }
+
+    .dual-chart-inner > div {
+      position: relative;
+    }
+
+    @media (max-width: 1200px) {
+      .main-grid {
+        grid-template-columns: 260px minmax(0, 1.2fr) 320px;
+      }
+    }
+
+    @media (max-width: 980px) {
+      body {
+        overflow: auto;
+        height: auto;
+      }
+      .dashboard-root {
+        height: auto;
+      }
+      .main-grid {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: auto auto auto;
+        height: auto;
+      }
+      .map-card {
+        height: 420px;
+      }
+      .dual-chart-inner {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+<div class="dashboard-root">
+  <!-- TOP BAR -->
+  <div class="top-bar">
+    <div class="top-title">
+      <h1>Route & Coverage Intelligence</h1>
+      <span>Powered by OAG 2023 + A2G Coverage | SkyFive Arabia</span>
+    </div>
+    <div class="top-actions">
+      <span class="tag-pill">OAG 2023 - Seats & Flights</span>
+      <label for="oagFileInput" class="file-upload-label">
+        <span class="icon">⬆</span>
+        <span>Upload OAG CSV</span>
+      </label>
+      <input id="oagFileInput" type="file" accept=".csv,text/csv" />
+    </div>
+  </div>
+
+  <!-- MAIN GRID -->
+  <div class="main-grid">
+    <!-- LEFT COLUMN: STATS + FILTERS -->
+    <div style="display:flex; flex-direction:column; gap:8px; min-height:0;">
+      <!-- KPI CARD -->
+      <div class="card">
+        <div class="card-header">
+          <h2>Market Snapshot</h2>
+          <small id="recordCountLabel">No data loaded</small>
+        </div>
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-header">
+              <div class="stat-label">Total Flights (2023)</div>
+              <div class="stat-help" data-tip="Sum of 2023 Flights column after all filters.">?</div>
+            </div>
+            <div class="stat-value" id="totalFlights">–</div>
+            <div class="stat-sub">Column: <b>2023 Flights</b></div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-header">
+              <div class="stat-label">Total Seats (2023)</div>
+              <div class="stat-help" data-tip="Sum of 2023 Seats column after all filters.">?</div>
+            </div>
+            <div class="stat-value" id="totalSeats">–</div>
+            <div class="stat-sub">Column: <b>2023 Seats</b></div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-header">
+              <div class="stat-label">Narrow Body Seats (2023)</div>
+              <div class="stat-help" data-tip="Seats where Narraw/Wide body = Narraw Body.">?</div>
+            </div>
+            <div class="stat-value" id="narrowSeats">–</div>
+            <div class="stat-sub">Filter: Narraw Body</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-header">
+              <div class="stat-label">A2G Seats (2023)</div>
+              <div class="stat-help" data-tip="Seats with inflight A2G connectivity (A2G seat column).">?</div>
+            </div>
+            <div class="stat-value" id="a2gSeats">–</div>
+            <div class="stat-sub">Column: <b>A2G seat</b></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- FILTERS CARD -->
+      <div class="card">
+        <div class="card-header">
+          <h2>Filters</h2>
+          <small>Live filter for KPIs, charts & map</small>
+        </div>
+        <!-- Domestic / International buttons -->
+        <div class="chip-row">
+          <button id="btnDomestic" class="chip-toggle">
+            <span class="dot"></span> Domestic
+          </button>
+          <button id="btnInternational" class="chip-toggle">
+            <span class="dot"></span> International
+          </button>
+        </div>
+
+        <!-- Carrier dropdown -->
+        <div class="select-group">
+          <label class="select-label" for="carrierSelect">
+            Carrier (IATA / Brand)
+          </label>
+          <select id="carrierSelect">
+            <option value="ALL">All Carriers</option>
+          </select>
+        </div>
+
+        <!-- Airline Owner multi-select -->
+        <div class="select-group">
+          <label class="select-label" for="ownerSelect">
+            Airline Owner (Multi-select)
+          </label>
+          <select id="ownerSelect" multiple></select>
+          <div class="hint-text">
+            Hold <b>Ctrl</b> (Windows) or <b>⌘</b> (Mac) to select multiple owners.
+          </div>
+        </div>
+
+        <!-- City-pair search -->
+        <div class="search-group">
+          <label class="select-label" for="routeSearch">
+            Zoom to City Pair (Route Search)
+          </label>
+          <div class="search-row">
+            <input
+              id="routeSearch"
+              class="search-input"
+              type="text"
+              placeholder="Type or pick a market pair…"
+            />
+            <select id="routeSearchResult" class="search-input">
+              <option value="">Results…</option>
+            </select>
+          </div>
+          <button id="routeSearchButton" class="search-button">
+            Zoom to Route
+          </button>
+          <button id="resetRoutesButton" class="search-button" style="margin-top:4px;">
+            Show all routes
+          </button>
+          <div class="search-hint">
+            Choose a market city pair to zoom and highlight that great-circle route on the map.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- MIDDLE COLUMN (3 ROWS) -->
+    <div class="middle-column">
+      <!-- Row 1: Coverage controls + routes toggle -->
+      <div class="coverage-card">
+        <div class="coverage-row">
+          <label class="map-pill">
+            <input type="checkbox" id="chkCurrent" checked />
+            <span class="color-dot"></span>
+            Current Coverage (Europe + KSA)
+          </label>
+          <label class="map-pill">
+            <input type="checkbox" id="chkProgress" checked />
+            <span class="color-dot soft"></span>
+            In-Progress (MENA hubs)
+          </label>
+          <label class="map-pill">
+            <input type="checkbox" id="chkPlan" checked />
+            <span class="color-dot light"></span>
+            Plan 2027 (Global growth)
+          </label>
+          <label class="map-pill">
+            <input type="checkbox" id="chkRoutes" checked />
+            <span class="color-dot" style="background:#54B8B3;"></span>
+            Show Routes
+          </label>
+        </div>
+      </div>
+
+      <!-- Row 2: Map -->
+      <div class="map-card">
+        <div id="map"></div>
+
+        <!-- Route legend -->
+        <div class="map-overlay-legend">
+          <div class="legend-card">
+            <div class="legend-row">
+              <div class="legend-line" style="background:#54B8B3;"></div>
+              <span>A2G route (&gt; 0% coverage)</span>
+            </div>
+            <div class="legend-row">
+              <div class="legend-line" style="background:#7EC7FA;"></div>
+              <span>Not covered (0% coverage)</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Row 3: Coverage insights -->
+      <div class="insight-card">
+        <div class="insight-title">Coverage Insights (Live with filters)</div>
+        <div class="insight-grid">
+          <div class="insight-item">
+            <div class="insight-label">% Seats with A2G</div>
+            <div class="insight-value" id="insightSeatCoverage">–</div>
+            <div class="insight-sub">Based on 2023 seats</div>
+          </div>
+          <div class="insight-item">
+            <div class="insight-label">Routes with A2G</div>
+            <div class="insight-value" id="insightRouteCoverage">–</div>
+            <div class="insight-sub">of all filtered routes</div>
+          </div>
+          <div class="insight-item">
+            <div class="insight-label">Avg A2G Coverage %</div>
+            <div class="insight-value" id="insightAvgCoverage">–</div>
+            <div class="insight-sub">Seat-weighted average</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT COLUMN: CHARTS -->
+    <div class="chart-card">
+      <!-- Bar chart: Top 10 market pairs -->
+      <div class="chart-panel">
+        <div class="chart-title">Top 10 Market City Pairs (Seats 2023)</div>
+        <div class="chart-inner">
+          <canvas id="topCityPairsChart"></canvas>
+        </div>
+        <div class="mini-kpi" id="top10ShareText">Top 10 share: –</div>
+      </div>
+
+      <!-- Pie chart: Domestic vs International -->
+      <div class="chart-panel">
+        <div class="chart-title">% Seats: Domestic vs International</div>
+        <div class="chart-inner">
+          <canvas id="domIntPieChart"></canvas>
+        </div>
+      </div>
+
+      <!-- Radar (left) + A2G donut (right) -->
+      <div class="chart-panel">
+        <div class="chart-title">Regional Seats & A2G Coverage</div>
+        <div class="chart-inner dual-chart-inner">
+          <div>
+            <canvas id="regionalRadarChart"></canvas>
+          </div>
+          <div>
+            <canvas id="a2gCoveragePieChart"></canvas>
+          </div>
+        </div>
+        <div class="hint-text">
+          Left: 2023 seats by key GCC + Egypt • Right: A2G vs non-A2G seats.
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // Register datalabels plugin
+  Chart.register(ChartDataLabels);
+
+  // MAP INITIALIZATION
+  mapboxgl.accessToken =
+    "pk.eyJ1IjoiYWhtZWQyNTEyIiwiYSI6ImNtY2NrZ2d3djBhY2EyaXNlbHRjZnQ3YXMifQ.BT22BFrdRAGHJH4zEvB6UQ";
+
+  const map = new mapboxgl.Map({
+    container: "map",
+    style: "mapbox://styles/mapbox/dark-v11",
+    center: [35, 28],
+    zoom: 1.5,
+    pitch: 40,
+    bearing: -15
+  });
+
+  map.on("load", () => {
+    const waterColor = "#031b3a";
+    const landColor = "#020617";
+
+    const layers = map.getStyle().layers;
+    layers.forEach((layer) => {
+      if (layer.type === "fill" && layer.id.toLowerCase().includes("land")) {
+        map.setPaintProperty(layer.id, "fill-color", landColor);
+      }
+      if (layer.type === "background") {
+        map.setPaintProperty(layer.id, "background-color", "#020716");
+        map.setPaintProperty(layer.id, "background-opacity", 1);
+      }
+      if (layer.id.toLowerCase().includes("water")) {
+        try {
+          map.setPaintProperty(layer.id, "fill-color", waterColor);
+        } catch (e) {}
+      }
+    });
+
+    const skyLayer = map.getStyle().layers.find(l => l.type === "sky");
+    if (skyLayer) {
+      map.removeLayer(skyLayer.id);
+    }
+
+    map.setFog({
+      "range": [0.8, 10],
+      "color": "#020716",
+      "horizon-blend": 0.1,
+      "high-color": "#020716",
+      "space-color": "#000000",
+      "star-intensity": 0.0
+    });
+
+    map.addSource("country-boundaries", {
+      type: "vector",
+      url: "mapbox://mapbox.country-boundaries-v1"
+    });
+
+    const CURRENT_COVERAGE = [
+      "ALB","AND","AUT","BEL","BGR","BIH","BLR","CHE","CYP","CZE","DEU","DNK",
+      "ESP","EST","FIN","FRA","GBR","GRC","HRV","HUN","IRL","ISL","ITA","LIE",
+      "LTU","LUX","LVA","MCO","MDA","MKD","MLT","MNE","NLD","NOR","POL","PRT",
+      "ROU","SMR","SRB","SVK","SVN","SWE","UKR","VAT","SAU"
+    ];
+    const INPROGRESS_COVERAGE = ["EGY","TUR","ARE","QAT","OMN","JOR","IRQ","KWT","BHR"];
+    const PLAN_2027 = ["ZAF","MAR","IND","CHN","IDN","MYS","KOR"];
+
+    function buildCountryFilter(list) {
+      return ["in", ["get", "iso_3166_1_alpha_3"], ["literal", list]];
+    }
+
+    map.addLayer({
+      id: "current-coverage",
+      type: "fill",
+      source: "country-boundaries",
+      "source-layer": "country_boundaries",
+      paint: { "fill-color": "#A92317", "fill-opacity": 0.6 },
+      filter: buildCountryFilter(CURRENT_COVERAGE)
+    });
+
+    map.addLayer({
+      id: "progress-coverage",
+      type: "fill",
+      source: "country-boundaries",
+      "source-layer": "country_boundaries",
+      paint: { "fill-color": "#A92317", "fill-opacity": 0.35 },
+      filter: buildCountryFilter(INPROGRESS_COVERAGE)
+    });
+
+    map.addLayer({
+      id: "plan-coverage",
+      type: "fill",
+      source: "country-boundaries",
+      "source-layer": "country_boundaries",
+      paint: { "fill-color": "#D0A3A1", "fill-opacity": 0.55 },
+      filter: buildCountryFilter(PLAN_2027)
+    });
+
+    map.addSource("routes", {
+      type: "geojson",
+      data: { type: "FeatureCollection", features: [] }
+    });
+
+    map.addLayer({
+      id: "routes-covered",
+      type: "line",
+      source: "routes",
+      paint: {
+        "line-color": "#54B8B3",
+        "line-width": [
+          "interpolate",
+          ["linear"],
+          ["coalesce", ["get", "seats"], 0],
+          0, 0.6,
+          200000, 3
+        ],
+        "line-opacity": 0.95
+      },
+      filter: ["==", ["get", "covered"], true]
+    });
+
+    map.addLayer({
+      id: "routes-not-covered",
+      type: "line",
+      source: "routes",
+      paint: {
+        "line-color": "#7EC7FA",
+        "line-width": [
+          "interpolate",
+          ["linear"],
+          ["coalesce", ["get", "seats"], 0],
+          0, 0.4,
+          200000, 2.6
+        ],
+        "line-opacity": 0.8
+      },
+      filter: ["==", ["get", "covered"], false]
+    });
+  });
+
+  // Coverage checkboxes
+  document.getElementById("chkCurrent").addEventListener("change", (e) => {
+    const v = e.target.checked ? "visible" : "none";
+    if (map.getLayer("current-coverage")) {
+      map.setLayoutProperty("current-coverage", "visibility", v);
+    }
+  });
+  document.getElementById("chkProgress").addEventListener("change", (e) => {
+    const v = e.target.checked ? "visible" : "none";
+    if (map.getLayer("progress-coverage")) {
+      map.setLayoutProperty("progress-coverage", "visibility", v);
+    }
+  });
+  document.getElementById("chkPlan").addEventListener("change", (e) => {
+    const v = e.target.checked ? "visible" : "none";
+    if (map.getLayer("plan-coverage")) {
+      map.setLayoutProperty("plan-coverage", "visibility", v);
+    }
+  });
+
+  // Routes visibility checkbox
+  document.getElementById("chkRoutes").addEventListener("change", (e) => {
+    const v = e.target.checked ? "visible" : "none";
+    if (map.getLayer("routes-covered")) {
+      map.setLayoutProperty("routes-covered", "visibility", v);
+    }
+    if (map.getLayer("routes-not-covered")) {
+      map.setLayoutProperty("routes-not-covered", "visibility", v);
+    }
+  });
+
+  const COLS = {
+    CARRIER: "Carrier Name",
+    DEP_CITY: "Dep City Name",
+    ARR_CITY: "Arr City Name",
+    DOM_INT: "International/Domestic",
+    SEATS_2023: "2023 Seats",
+    FLIGHTS_2023: "2023 Flights",
+    BODY: "Narraw/Wide body",
+    OWNER: "Airline owner ",
+    A2G_OTHER: "A2G|Other ",
+    A2G_COV: "A2G coverage%",
+    A2G_SEAT: "A2G seat ",
+    MARKET_CITY: "Market Pair (City)",
+    DEP_LAT: "Dep. Lat ",
+    DEP_LNG: "Dep.Lng",
+    ARR_LAT: "Arr.lat",
+    ARR_LNG: "Arr.Lng",
+    DEP_COUNTRY: "Dep DOT Country Name",
+    ARR_COUNTRY: "Arr DOT Country Name"
+  };
+
+  let allRows = [];
+  let filteredRows = [];
+  let routeIndex = [];
+  let routesFeatureCollection = null;
+
+  const stateFilters = {
+    domesticActive: false,
+    internationalActive: false,
+    carrier: "ALL",
+    owners: []
+  };
+
+  const elTotalFlights = document.getElementById("totalFlights");
+  const elTotalSeats   = document.getElementById("totalSeats");
+  const elNarrowSeats  = document.getElementById("narrowSeats");
+  const elA2GSeats     = document.getElementById("a2gSeats");
+  const elRecordCount  = document.getElementById("recordCountLabel");
+  const elTop10Share   = document.getElementById("top10ShareText");
+
+  const elSeatCoverage   = document.getElementById("insightSeatCoverage");
+  const elRouteCoverage  = document.getElementById("insightRouteCoverage");
+  const elAvgCoverage    = document.getElementById("insightAvgCoverage");
+
+  const carrierSelect      = document.getElementById("carrierSelect");
+  const ownerSelect        = document.getElementById("ownerSelect");
+  const btnDomestic        = document.getElementById("btnDomestic");
+  const btnInternational   = document.getElementById("btnInternational");
+  const routeSearchInput   = document.getElementById("routeSearch");
+  const routeSearchResult  = document.getElementById("routeSearchResult");
+  const routeSearchButton  = document.getElementById("routeSearchButton");
+  const resetRoutesButton  = document.getElementById("resetRoutesButton");
+
+  let topCityPairsChart = null;
+  let domIntPieChart = null;
+  let a2gCoveragePieChart = null;
+  let regionalRadarChart = null;
+
+  function formatNumber(n) {
+    if (!n || isNaN(n)) return "0";
+    return n.toLocaleString(undefined, { maximumFractionDigits: 0 });
+  }
+
+  function formatMillions(n) {
+    if (!n || isNaN(n)) return "0";
+    const m = n / 1000000;
+    return m.toFixed(1) + "M";
+  }
+
+  function getSelectedOwners() {
+    const options = Array.from(ownerSelect.options);
+    return options.filter(o => o.selected && o.value).map(o => o.value);
+  }
+
+  function applyFilters() {
+    const {domesticActive, internationalActive, carrier, owners} = stateFilters;
+
+    filteredRows = allRows.filter(row => {
+      const domInt = (row[COLS.DOM_INT] || "").toString().trim();
+
+      if (domesticActive && !internationalActive && domInt !== "Domestic") return false;
+      if (!domesticActive && internationalActive && domInt !== "International") return false;
+
+      if (carrier && carrier !== "ALL") {
+        if ((row[COLS.CARRIER] || "").toString().trim() !== carrier) return false;
+      }
+
+      if (owners.length > 0) {
+        const ownerVal = (row[COLS.OWNER] || "").toString().trim();
+        if (!owners.includes(ownerVal)) return false;
+      }
+
+      return true;
+    });
+  }
+
+  function updateKPIs() {
+    let totalFlights = 0;
+    let totalSeats   = 0;
+    let narrowSeats  = 0;
+    let a2gSeats     = 0;
+
+    filteredRows.forEach(row => {
+      const seats   = Number(row[COLS.SEATS_2023])  || 0;
+      const flights = Number(row[COLS.FLIGHTS_2023])|| 0;
+      const body    = (row[COLS.BODY] || "").toString().trim();
+      const a2gSeat = Number(row[COLS.A2G_SEAT])    || 0;
+
+      totalSeats   += seats;
+      totalFlights += flights;
+      a2gSeats     += a2gSeat;
+
+      if (body.toLowerCase().startsWith("narraw")) {
+        narrowSeats += seats;
+      }
+    });
+
+    elTotalFlights.textContent = formatNumber(totalFlights);
+    elTotalSeats.textContent   = formatNumber(totalSeats);
+    elNarrowSeats.textContent  = formatNumber(narrowSeats);
+    elA2GSeats.textContent     = formatNumber(a2gSeats);
+    elRecordCount.textContent  =
+      filteredRows.length.toLocaleString() + " routes after filters";
+  }
+
+  function updateTopCityPairsChart() {
+    const agg = new Map();
+    let totalSeats = 0;
+
+    filteredRows.forEach(row => {
+      const key =
+        (row[COLS.MARKET_CITY] ||
+          `${row[COLS.DEP_CITY] || ""} → ${row[COLS.ARR_CITY] || ""}`).toString();
+      const seats = Number(row[COLS.SEATS_2023]) || 0;
+      totalSeats += seats;
+      if (!agg.has(key)) agg.set(key, 0);
+      agg.set(key, agg.get(key) + seats);
+    });
+
+    const sorted = Array.from(agg.entries())
+      .sort((a,b) => b[1] - a[1])
+      .slice(0,10);
+
+    const labels = sorted.map(x => x[0]);
+    const data   = sorted.map(x => x[1]);
+    const top10Seats = data.reduce((a,b) => a + b, 0);
+    const share = totalSeats > 0 ? (top10Seats / totalSeats) * 100 : 0;
+    elTop10Share.textContent =
+      "Top 10 share: " + (share ? share.toFixed(1) + "%" : "–");
+
+    if (topCityPairsChart) topCityPairsChart.destroy();
+
+    const ctx = document.getElementById("topCityPairsChart").getContext("2d");
+    topCityPairsChart = new Chart(ctx, {
+      type: "bar",
+      data: {
+        labels,
+        datasets: [{
+          label: "Seats 2023",
+          data,
+          backgroundColor: "rgba(84, 184, 179, 0.85)"
+        }]
+      },
+      options: {
+        maintainAspectRatio: false,
+        scales: {
+          x: {
+            ticks: { color: "#9fb3d9", font: { size: 9 } }
+          },
+          y: {
+            ticks: {
+              color: "#9fb3d9",
+              font: { size: 9 },
+              callback: value => formatMillions(value)
+            },
+            grid: { color: "rgba(148,163,184,0.25)" }
+          }
+        },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: ctx =>
+                `${formatNumber(ctx.raw)} seats (${formatMillions(ctx.raw)})`
+            }
+          },
+          datalabels: {
+            anchor: "end",
+            align: "end",
+            offset: -2,
+            color: "#e5e7eb",
+            font: { size: 8 },
+            formatter: value => formatMillions(value)
+          }
+        }
+      }
+    });
+  }
+
+  function updateDomIntPieChart() {
+    let domSeats = 0, intlSeats = 0;
+
+    filteredRows.forEach(row => {
+      const seats = Number(row[COLS.SEATS_2023]) || 0;
+      const domInt = (row[COLS.DOM_INT] || "").toString().trim();
+      if (domInt === "Domestic") domSeats += seats;
+      else if (domInt === "International") intlSeats += seats;
+    });
+
+    if (domIntPieChart) domIntPieChart.destroy();
+    const total = domSeats + intlSeats;
+
+    const ctx = document.getElementById("domIntPieChart").getContext("2d");
+    domIntPieChart = new Chart(ctx, {
+      type: "pie",
+      data: {
+        labels: ["Domestic", "International"],
+        datasets: [{
+          data: [domSeats, intlSeats],
+          backgroundColor: [
+            "rgba(84,184,179,0.85)",
+            "rgba(126,199,250,0.9)"
+          ]
+        }]
+      },
+      options: {
+        maintainAspectRatio: false,
+        plugins: {
+          legend: {
+            position: "bottom",
+            labels: { color: "#e5e7eb", font: { size: 9 } }
+          },
+          tooltip: {
+            callbacks: {
+              label: ctx =>
+                `${ctx.label}: ${formatNumber(ctx.raw)} seats`
+            }
+          },
+          datalabels: {
+            color: "#0f172a",
+            font: { size: 8, weight: "600" },
+            formatter: value => {
+              if (!total) return "";
+              const p = (value / total) * 100;
+              return p.toFixed(1) + "%";
+            }
+          }
+        }
+      }
+    });
+  }
+
+  function updateA2GChartsAndInsights() {
+    let totalSeats = 0;
+    let coverageSeats = 0;
+    let weightedCovNom = 0;
+    let seatsWithCov = 0;
+
+    filteredRows.forEach(row => {
+      const seats = Number(row[COLS.SEATS_2023]) || 0;
+      const a2gSeat = Number(row[COLS.A2G_SEAT]) || 0;
+      const cov = Number(row[COLS.A2G_COV]) || 0;
+
+      totalSeats += seats;
+      coverageSeats += a2gSeat;
+
+      if (cov > 0 && seats > 0) {
+        weightedCovNom += cov * seats;
+        seatsWithCov += seats;
+      }
+    });
+
+    const nonCoverageSeats = Math.max(totalSeats - coverageSeats, 0);
+
+    if (a2gCoveragePieChart) a2gCoveragePieChart.destroy();
+    const ctx = document.getElementById("a2gCoveragePieChart").getContext("2d");
+    a2gCoveragePieChart = new Chart(ctx, {
+      type: "doughnut",
+      data: {
+        labels: ["A2G Covered", "Not Covered"],
+        datasets: [{
+          data: [coverageSeats, nonCoverageSeats],
+          backgroundColor: [
+            "rgba(169,35,23,0.9)",
+            "rgba(55,65,81,0.9)"
+          ],
+          borderWidth: 1
+        }]
+      },
+      options: {
+        maintainAspectRatio: false,
+        cutout: "60%",
+        plugins: {
+          legend: {
+            position: "bottom",
+            labels: { color: "#e5e7eb", font: { size: 9 } }
+          },
+          tooltip: {
+            callbacks: {
+              label: ctx =>
+                `${ctx.label}: ${formatNumber(ctx.raw)} seats`
+            }
+          },
+          datalabels: {
+            color: "#e5e7eb",
+            font: { size: 8 },
+            formatter: value => {
+              const total = coverageSeats + nonCoverageSeats;
+              if (!total) return "";
+              const p = (value / total) * 100;
+              return p.toFixed(1) + "%";
+            }
+          }
+        }
+      }
+    });
+
+    const seatCoveragePct =
+      totalSeats > 0 ? (coverageSeats / totalSeats) * 100 : 0;
+    const avgCovPct =
+      seatsWithCov > 0 ? (weightedCovNom / seatsWithCov) : 0;
+
+    elSeatCoverage.textContent =
+      totalSeats ? seatCoveragePct.toFixed(1) + "%" : "–";
+    elAvgCoverage.textContent =
+      seatsWithCov ? avgCovPct.toFixed(1) + "%" : "–";
+  }
+
+  // Radar chart seats for key countries
+  const RADAR_COUNTRIES = [
+    "Saudi Arabia",
+    "Egypt",
+    "Jordan",
+    "United Arab Emirates",
+    "Qatar",
+    "Iraq",
+    "Kuwait",
+    "Bahrain",
+    "Oman"
+  ];
+
+  function countryMatches(cellValue, target) {
+    const v = (cellValue || "").toString().toLowerCase();
+    const t = target.toLowerCase();
+    if (!v) return false;
+
+    if (t === "saudi arabia") return v.includes("saudi");
+    if (t === "united arab emirates") return v.includes("united arab") || v === "uae";
+    if (t === "qatar") return v.includes("qatar");
+    if (t === "kuwait") return v.includes("kuwait");
+    if (t === "bahrain") return v.includes("bahrain");
+    if (t === "oman") return v.includes("oman");
+    if (t === "iraq") return v.includes("iraq");
+    if (t === "egypt") return v.includes("egypt");
+    if (t === "jordan") return v.includes("jordan") || v.includes("jordon");
+    return v.includes(t);
+  }
+
+  function updateRegionalRadarChart() {
+    if (regionalRadarChart) regionalRadarChart.destroy();
+
+    const dataByCountry = RADAR_COUNTRIES.map(country => {
+      let sumSeats = 0;
+      filteredRows.forEach(row => {
+        const depC = row[COLS.DEP_COUNTRY];
+        const arrC = row[COLS.ARR_COUNTRY];
+        if (countryMatches(depC, country) || countryMatches(arrC, country)) {
+          sumSeats += Number(row[COLS.SEATS_2023]) || 0;
+        }
+      });
+      return sumSeats;
+    });
+
+    const ctx = document.getElementById("regionalRadarChart").getContext("2d");
+    regionalRadarChart = new Chart(ctx, {
+      type: "radar",
+      data: {
+        labels: RADAR_COUNTRIES,
+        datasets: [{
+          label: "Seats 2023",
+          data: dataByCountry,
+          borderColor: "rgba(126,199,250,0.9)",
+          backgroundColor: "rgba(126,199,250,0.25)",
+          pointRadius: 2,
+          pointBackgroundColor: "rgba(126,199,250,1)"
+        }]
+      },
+      options: {
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          datalabels: {
+            color: "#e5e7eb",
+            font: { size: 7 },
+            formatter: value => value ? formatMillions(value) : ""
+          }
+        },
+        scales: {
+          r: {
+            angleLines: { color: "rgba(148,163,184,0.2)" },
+            grid: { color: "rgba(148,163,184,0.25)" },
+            pointLabels: {
+              color: "#e5e7eb",
+              font: { size: 8 }
+            },
+            ticks: {
+              display: false
+            }
+          }
+        }
+      }
+    });
+  }
+
+  function updateRoutesOnMapAndRouteInsights() {
+    if (!map.getSource("routes")) return;
+
+    const agg = new Map();
+
+    filteredRows.forEach(row => {
+      const depLat = Number(row[COLS.DEP_LAT]);
+      const depLng = Number(row[COLS.DEP_LNG]);
+      const arrLat = Number(row[COLS.ARR_LAT]);
+      const arrLng = Number(row[COLS.ARR_LNG]);
+
+      if (!isFinite(depLat) || !isFinite(depLng) ||
+          !isFinite(arrLat) || !isFinite(arrLng)) return;
+      if (!depLat && !depLng && !arrLat && !arrLng) return;
+
+      const key =
+        (row[COLS.MARKET_CITY] ||
+          `${row[COLS.DEP_CITY] || ""} → ${row[COLS.ARR_CITY] || ""}`).toString();
+
+      const seats = Number(row[COLS.SEATS_2023]) || 0;
+      const cov   = Number(row[COLS.A2G_COV]) || 0;
+      const covered = cov > 0;
+
+      if (!agg.has(key)) {
+        agg.set(key, {
+          depLat, depLng, arrLat, arrLng,
+          seats: 0,
+          covered: false
+        });
+      }
+
+      const entry = agg.get(key);
+      entry.seats += seats;
+      if (covered) entry.covered = true;
+    });
+
+    const features = [];
+    let totalRoutes = 0;
+    let coveredRoutes = 0;
+
+    agg.forEach((entry, key) => {
+      totalRoutes++;
+      if (entry.covered) coveredRoutes++;
+
+      const start = [entry.depLng, entry.depLat];
+      const end   = [entry.arrLng, entry.arrLat];
+
+      try {
+        const gc = turf.greatCircle(start, end, { npoints: 100 });
+        gc.properties = {
+          name: key,
+          seats: entry.seats,
+          covered: entry.covered
+        };
+        features.push(gc);
+      } catch (e) {
+        features.push({
+          type: "Feature",
+          geometry: { type: "LineString", coordinates: [start, end] },
+          properties: {
+            name: key,
+            seats: entry.seats,
+            covered: entry.covered
+          }
+        });
+      }
+    });
+
+    const fc = { type: "FeatureCollection", features };
+    routesFeatureCollection = fc;
+    const routesSource = map.getSource("routes");
+    if (routesSource) {
+      routesSource.setData(fc);
+    }
+    routeIndex = fc.features;
+    buildRouteSearchIndex();
+
+    const routeCovPct =
+      totalRoutes > 0 ? (coveredRoutes / totalRoutes) * 100 : 0;
+    elRouteCoverage.textContent =
+      totalRoutes ? `${coveredRoutes}/${totalRoutes} (${routeCovPct.toFixed(1)}%)` : "–";
+  }
+
+  function refreshAll() {
+    if (!allRows.length) return;
+    applyFilters();
+    updateKPIs();
+    updateTopCityPairsChart();
+    updateDomIntPieChart();
+    updateA2GChartsAndInsights();
+    updateRegionalRadarChart();
+    updateRoutesOnMapAndRouteInsights();
+  }
+
+  // City-pair search & route focus
+  function buildRouteSearchIndex() {
+    updateRouteSearchResults();
+  }
+
+  function updateRouteSearchResults() {
+    const term = routeSearchInput.value.trim().toLowerCase();
+    routeSearchResult.innerHTML = '<option value="">Results…</option>';
+    if (!term) return;
+
+    const matches = routeIndex
+      .filter(f => {
+        const name = (f.properties?.name || "").toString().toLowerCase();
+        return name.includes(term);
+      })
+      .slice(0, 30);
+
+    matches.forEach(f => {
+      const opt = document.createElement("option");
+      opt.textContent = f.properties?.name || "Route";
+      opt.dataset.routeName = f.properties?.name || "";
+      routeSearchResult.appendChild(opt);
+    });
+  }
+
+  function resetRoutesView() {
+    if (!routesFeatureCollection || !map.getSource("routes")) return;
+    map.getSource("routes").setData(routesFeatureCollection);
+    routeIndex = routesFeatureCollection.features;
+  }
+
+  function zoomToSelectedRoute() {
+    const selectedOpt = routeSearchResult.selectedOptions[0];
+    if (!selectedOpt || !selectedOpt.dataset.routeName) return;
+    const name = selectedOpt.dataset.routeName;
+    if (!routesFeatureCollection) return;
+
+    const feature = routesFeatureCollection.features.find(
+      f => (f.properties?.name || "") === name
+    );
+    if (!feature) return;
+
+    const single = { type: "FeatureCollection", features: [feature] };
+    map.getSource("routes").setData(single);
+    routeIndex = single.features;
+
+    const bbox = turf.bbox(feature);
+    map.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], {
+      padding: 80,
+      duration: 900,
+      pitch: 55
+    });
+  }
+
+  // Zoom to “home + KSA” for selected airline
+  function zoomToCarrierNetwork() {
+    if (!filteredRows.length) return;
+
+    if (!routesFeatureCollection || !routesFeatureCollection.features.length) {
+      return;
+    }
+
+    const seatsByCountry = new Map();
+    filteredRows.forEach(row => {
+      const seats = Number(row[COLS.SEATS_2023]) || 0;
+      const depC = (row[COLS.DEP_COUNTRY] || "").toString().trim();
+      const arrC = (row[COLS.ARR_COUNTRY] || "").toString().trim();
+      if (depC) seatsByCountry.set(depC, (seatsByCountry.get(depC) || 0) + seats);
+      if (arrC) seatsByCountry.set(arrC, (seatsByCountry.get(arrC) || 0) + seats);
+    });
+
+    let homeCountry = null;
+    let maxSeats = 0;
+    seatsByCountry.forEach((v, k) => {
+      if (v > maxSeats) {
+        maxSeats = v;
+        homeCountry = k;
+      }
+    });
+
+    const importantCountries = new Set();
+    if (homeCountry) importantCountries.add(homeCountry);
+    importantCountries.add("Saudi Arabia");
+
+    const points = [];
+    filteredRows.forEach(row => {
+      const depC = (row[COLS.DEP_COUNTRY] || "").toString().trim();
+      const arrC = (row[COLS.ARR_COUNTRY] || "").toString().trim();
+      const depLat = Number(row[COLS.DEP_LAT]);
+      const depLng = Number(row[COLS.DEP_LNG]);
+      const arrLat = Number(row[COLS.ARR_LAT]);
+      const arrLng = Number(row[COLS.ARR_LNG]);
+
+      if (!isFinite(depLat) || !isFinite(depLng) ||
+          !isFinite(arrLat) || !isFinite(arrLng)) return;
+      if (!depLat && !depLng && !arrLat && !arrLng) return;
+
+      if (importantCountries.has(depC) || importantCountries.has(arrC)) {
+        points.push([depLng, depLat], [arrLng, arrLat]);
+      }
+    });
+
+    if (!points.length) {
+      const bboxFallback = turf.bbox(routesFeatureCollection);
+      map.fitBounds([[bboxFallback[0], bboxFallback[1]], [bboxFallback[2], bboxFallback[3]]], {
+        padding: 80,
+        duration: 900,
+        pitch: 45
+      });
+      return;
+    }
+
+    const fc = {
+      type: "FeatureCollection",
+      features: points.map(coord => ({
+        type: "Feature",
+        geometry: { type: "Point", coordinates: coord },
+        properties: {}
+      }))
+    };
+
+    const bbox = turf.bbox(fc);
+    map.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], {
+      padding: 80,
+      duration: 900,
+      pitch: 45
+    });
+  }
+
+  // Events
+  routeSearchInput.addEventListener("input", updateRouteSearchResults);
+  routeSearchButton.addEventListener("click", zoomToSelectedRoute);
+  resetRoutesButton.addEventListener("click", () => {
+    resetRoutesView();
+    routeSearchResult.selectedIndex = 0;
+  });
+
+  btnDomestic.addEventListener("click", () => {
+    stateFilters.domesticActive = !stateFilters.domesticActive;
+    btnDomestic.classList.toggle("active", stateFilters.domesticActive);
+    refreshAll();
+  });
+  btnInternational.addEventListener("click", () => {
+    stateFilters.internationalActive = !stateFilters.internationalActive;
+    btnInternational.classList.toggle("active", stateFilters.internationalActive);
+    refreshAll();
+  });
+  carrierSelect.addEventListener("change", e => {
+    stateFilters.carrier = e.target.value;
+    refreshAll();
+    zoomToCarrierNetwork();
+  });
+  ownerSelect.addEventListener("change", () => {
+    stateFilters.owners = getSelectedOwners();
+    refreshAll();
+  });
+
+  document.getElementById("oagFileInput")
+    .addEventListener("change", (event) => {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      Papa.parse(file, {
+        header: true,
+        dynamicTyping: true,
+        skipEmptyLines: true,
+        complete: (results) => {
+          allRows = results.data.filter(row =>
+            row[COLS.CARRIER] && row[COLS.SEATS_2023] != null
+          );
+
+          const carriersSet = new Set();
+          const ownersSet   = new Set();
+
+          allRows.forEach(row => {
+            const c = (row[COLS.CARRIER] || "").toString().trim();
+            const o = (row[COLS.OWNER]   || "").toString().trim();
+            if (c) carriersSet.add(c);
+            if (o) ownersSet.add(o);
+          });
+
+          carrierSelect.innerHTML = '<option value="ALL">All Carriers</option>';
+          Array.from(carriersSet).sort().forEach(c => {
+            const opt = document.createElement("option");
+            opt.value = c;
+            opt.textContent = c;
+            carrierSelect.appendChild(opt);
+          });
+          stateFilters.carrier = "ALL";
+
+          ownerSelect.innerHTML = "";
+          Array.from(ownersSet).sort().forEach(o => {
+            const opt = document.createElement("option");
+            opt.value = o;
+            opt.textContent = o;
+            ownerSelect.appendChild(opt);
+          });
+          stateFilters.owners = [];
+
+          elRecordCount.textContent =
+            allRows.length.toLocaleString() + " OAG rows loaded";
+
+          refreshAll();
+        }
+      });
+    });
+</script>
+</body>
+</html>
